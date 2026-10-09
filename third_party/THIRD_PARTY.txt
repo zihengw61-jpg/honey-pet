@@ -1,0 +1,27 @@
+HoneyPet portable Windows distribution: third-party components
+
+Python 3.12.10 (Windows x64)
+  Publisher: Python Software Foundation.
+  Official distribution: https://api.nuget.org/v3-flatcontainer/python/3.12.10/python.3.12.10.nupkg
+  License: Python Software Foundation License and bundled notices.
+  The full upstream Python LICENSE.txt is at the distribution root.
+  HoneyPet.exe is the unmodified upstream pythonw.exe with its filename changed.
+
+PySide6-Essentials 6.8.3 and shiboken6 6.8.3
+  Publisher: The Qt Company / Qt for Python contributors.
+  Obtained from the official releases on https://pypi.org/.
+  The packages are offered under LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.
+  This distribution uses the LGPL v3 option where applicable.
+  Full LGPL v3 and accompanying GPL v3 license texts are in third_party/licenses/.
+  Original wheel metadata and license files are preserved in Lib/site-packages/*.dist-info/.
+  Corresponding source repositories / version tags:
+    https://github.com/qt/pyside-setup/tree/v6.8.3
+    https://github.com/qt/qtbase/tree/v6.8.3
+    https://github.com/qt/qtsvg/tree/v6.8.3
+    https://github.com/qt/qtdeclarative/tree/v6.8.3
+    https://github.com/qt/qttools/tree/v6.8.3
+  The runtime loads these libraries dynamically. You may replace them with
+  compatible builds in Lib/site-packages, including modified builds.
+  Application source is included under app/. No component above was modified.
+
+distribution.json records the downloaded input SHA-256 hashes and versions.

@@ -1,0 +1,55 @@
+name: Windows desktop pet
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+          cache: pip
+      - name: Install pinned build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Test interactions
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests
+      - name: Check Windows app initialization
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python main.py --smoke-test
+      - name: Build executable folder
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $petBuildArgs = @('--noconfirm', '--clean', '--windowed', '--onedir', '--name', 'HoneyPet')
+          if (Test-Path assets/pet.ico) { $petBuildArgs += @('--icon', 'assets/pet.ico') }
+          if (Test-Path assets) { $petBuildArgs += @('--add-data', 'assets;assets') }
+          python -m PyInstaller @petBuildArgs main.py
+          if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
+          $petProcess = Start-Process -FilePath (Resolve-Path dist/HoneyPet/HoneyPet.exe) -ArgumentList '--smoke-test' -PassThru
+          if (-not $petProcess.WaitForExit(15000)) {
+            Stop-Process -Id $petProcess.Id -Force
+            throw 'Packaged pet did not finish its smoke test'
+          }
+          if ($petProcess.ExitCode -ne 0) { throw "Packaged pet startup failed: $($petProcess.ExitCode)" }
+          Copy-Item README.md dist/HoneyPet/README.md
+          if (Test-Path WINDOWS.md) { Copy-Item WINDOWS.md dist/HoneyPet/WINDOWS.md }
+          Compress-Archive -Path dist/HoneyPet -DestinationPath dist/HoneyPet-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HoneyPet-Windows-x64
+          path: dist/HoneyPet-Windows-x64.zip
+          retention-days: 30
