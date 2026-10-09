@@ -34,9 +34,11 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
+          python scripts/stage_public_assets.py --output .build/public-assets
+          if ($LASTEXITCODE -ne 0) { throw 'Public asset staging failed' }
           $petBuildArgs = @('--noconfirm', '--clean', '--windowed', '--onedir', '--name', 'HoneyPet')
-          if (Test-Path assets/pet.ico) { $petBuildArgs += @('--icon', 'assets/pet.ico') }
-          if (Test-Path assets) { $petBuildArgs += @('--add-data', 'assets;assets') }
+          if (Test-Path .build/public-assets/pet.ico) { $petBuildArgs += @('--icon', '.build/public-assets/pet.ico') }
+          if (Test-Path .build/public-assets) { $petBuildArgs += @('--add-data', '.build/public-assets;assets') }
           python -m PyInstaller @petBuildArgs main.py
           if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
           $petProcess = Start-Process -FilePath (Resolve-Path dist/HoneyPet/HoneyPet.exe) -ArgumentList '--smoke-test' -PassThru
@@ -47,6 +49,8 @@ jobs:
           if ($petProcess.ExitCode -ne 0) { throw "Packaged pet startup failed: $($petProcess.ExitCode)" }
           Copy-Item README.md dist/HoneyPet/README.md
           if (Test-Path WINDOWS.md) { Copy-Item WINDOWS.md dist/HoneyPet/WINDOWS.md }
+          python scripts/stage_public_assets.py --audit dist/HoneyPet
+          if ($LASTEXITCODE -ne 0) { throw 'Public artifact audit failed' }
           Compress-Archive -Path dist/HoneyPet -DestinationPath dist/HoneyPet-Windows-x64.zip
       - uses: actions/upload-artifact@v4
         with:

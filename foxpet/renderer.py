@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 
+from .dances import DANCE_SECONDS, DANCE_STYLES, dance_pose
+
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
@@ -229,7 +231,7 @@ def _draw_foot(painter: QPainter, x: float, y: float, angle: float = 0) -> None:
     painter.restore()
 
 
-def _draw_arm(painter: QPainter, right: bool, angle: float, raised: bool = False) -> None:
+def _draw_arm(painter: QPainter, right: bool, angle: float, raised: bool = False, raise_amount: float | None = None) -> None:
     painter.save()
     if right:
         painter.translate(300, 0)
@@ -237,33 +239,31 @@ def _draw_arm(painter: QPainter, right: bool, angle: float, raised: bool = False
     painter.translate(112, 202)
     painter.rotate(angle)
     painter.translate(-112, -202)
-    if raised:
-        arm = _path([
-            ("M", (118, 200)),
-            ("C", (100, 204, 91, 191, 88, 177)),
-            ("C", (83, 164, 68, 167, 70, 181)),
-            ("C", (70, 211, 91, 230, 112, 219)),
-            ("Z", ()),
-        ])
-    else:
-        arm = _path([
-            ("M", (110, 195)),
-            ("C", (95, 200, 88, 221, 93, 239)),
-            ("C", (96, 250, 108, 249, 113, 239)),
-            ("C", (119, 224, 127, 204, 110, 195)),
-            ("Z", ()),
-        ])
+    lift = _clamp(float(raised) if raise_amount is None else raise_amount)
+    resting = [
+        ("M", (110, 195)), ("C", (95, 200, 88, 221, 93, 239)),
+        ("C", (96, 250, 108, 249, 113, 239)),
+        ("C", (119, 224, 127, 204, 110, 195)), ("Z", ()),
+    ]
+    lifted = [
+        ("M", (118, 200)), ("C", (100, 204, 91, 191, 88, 177)),
+        ("C", (83, 164, 68, 167, 70, 181)),
+        ("C", (70, 211, 91, 230, 112, 219)), ("Z", ()),
+    ]
+    arm = _path([
+        (operation, tuple(a + (b - a) * lift for a, b in zip(start, finish)))
+        for (operation, start), (_, finish) in zip(resting, lifted)
+    ])
     painter.setPen(_pen(_OUTLINE, 2.3))
     painter.setBrush(_gradient(94, 187, 108, 244, "#f19367", "#df6852"))
     painter.drawPath(arm)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(_CREAM)
-    if raised:
-        painter.drawEllipse(QRectF(71, 164, 18, 23))
+    painter.drawEllipse(QRectF(94 - 23 * lift, 230 - 66 * lift, 18, 17 + 6 * lift))
+    if lift > 0:
+        painter.setOpacity(painter.opacity() * lift)
         painter.setBrush(QColor("#eea29f"))
-        painter.drawEllipse(QRectF(77, 171, 7, 9))
-    else:
-        painter.drawEllipse(QRectF(94, 230, 18, 17))
+        painter.drawEllipse(QRectF(100 - 23 * lift, 237 - 66 * lift, 7, 9))
     painter.restore()
 
 
@@ -374,7 +374,7 @@ def _draw_face(painter: QPainter, state: str, time_s: float, look, tilt: float, 
     blush.setFocalPoint(209, 155)
     painter.setBrush(blush)
     painter.drawEllipse(QRectF(191, 145, 36, 20))
-    happy = state in ("happy", "dance", "feed")
+    happy = state in ("happy", "dance", "feed") or state.startswith("dance_")
     sleeping = state == "sleep" or paused
     opening = 0 if sleeping else _blink(time_s)
     _draw_eye(painter, 111, 129, opening, look, happy=happy, sleeping=sleeping)
@@ -448,6 +448,40 @@ def _draw_notes(painter: QPainter, time_s: float) -> None:
         painter.setBrush(QColor(color))
         painter.drawEllipse(QRectF(-6, -3, 10, 7))
         painter.restore()
+
+
+def _draw_dance_effects(painter: QPainter, style: str, time_s: float, intensity: float) -> None:
+    """A different, light accent for each routine; all fade with the pose."""
+    painter.save()
+    painter.setOpacity(intensity * 0.85)
+    _draw_notes(painter, time_s)
+    if style == "heart":
+        for index, (x, y) in enumerate(((150, 207), (60, 116), (244, 84))):
+            phase = (time_s * 0.5 + index / 3) % 1
+            _heart(painter, x, y - phase * 18, 16 if index else 20, math.sin(phase * math.pi) * intensity)
+    elif style == "shuffle":
+        for index, x in enumerate((112, 185)):
+            pulse = (1 + math.sin(time_s * math.tau * 0.95 + index * math.pi)) / 2
+            painter.setPen(_pen(QColor(161, 191, 205, int(120 * pulse)), 2))
+            painter.setBrush(QColor(173, 208, 216, int(32 * pulse)))
+            painter.drawEllipse(QRectF(x - 23, 279, 46, 13))
+    elif style == "swing":
+        painter.setPen(_pen(QColor("#c9a4df"), 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for x, side in ((63, -1), (237, 1)):
+            sway = math.sin(time_s * math.tau * 0.95) * 9
+            painter.drawPath(_path([
+                ("M", (x, 205 + sway)),
+                ("Q", (x + side * 12, 217 + sway, x + side * 5, 231 + sway)),
+            ]))
+    else:
+        painter.setPen(_pen(QColor("#d8ae69"), 2))
+        for index in range(4):
+            x = 63 if index < 2 else 238
+            y = 183 + (index % 2) * 52 - math.sin(time_s * 5 + index) * 5
+            painter.drawLine(QPointF(x - 4, y), QPointF(x + 4, y))
+            painter.drawLine(QPointF(x, y - 4), QPointF(x, y + 4))
+    painter.restore()
 
 
 def _draw_cookie(painter: QPainter, time_s: float) -> None:
@@ -560,6 +594,10 @@ def draw_scene(
     painter.setClipRect(QRectF(0, 0, SCENE_WIDTH, SCENE_HEIGHT), Qt.ClipOperation.IntersectClip)
     active_state = "sleep" if paused else state
     motion_time = 0.0 if paused else time_s
+    dance_style = "shuffle" if active_state == "dance" else active_state.removeprefix("dance_")
+    dancing = active_state == "dance" or (active_state.startswith("dance_") and dance_style in DANCE_STYLES)
+    action_time = progress * DANCE_SECONDS if dancing else motion_time
+    pose = dance_pose(dance_style, progress) if dancing else None
     breathe = math.sin(motion_time * (1.4 if active_state == "sleep" else 2.2))
     body_scale_x = 1 + breathe * 0.007
     body_scale_y = 1 - breathe * 0.007
@@ -583,14 +621,13 @@ def draw_scene(
     elif active_state == "feed":
         head_tilt = math.sin(motion_time * 6) * 2
         tail_angle = math.sin(motion_time * 5) * 7
-    elif active_state == "dance":
-        bounce = -abs(math.sin(motion_time * 6.5)) * 10
-        shift_x = math.sin(motion_time * 6.5) * 7
-        angle = math.sin(motion_time * 6.5) * 5
-        head_tilt = math.sin(motion_time * 6.5 + 0.3) * 7
-        tail_angle = math.sin(motion_time * 6.5 + 1) * 12
-        ear_motion = math.sin(motion_time * 6.5) * 4
-        body_scale_x += abs(math.sin(motion_time * 6.5)) * 0.015
+    elif dancing:
+        bounce, shift_x, angle = pose.bounce, pose.shift_x, pose.angle
+        head_tilt += pose.head_tilt
+        tail_angle += pose.tail_angle
+        ear_motion += pose.ear_motion
+        body_scale_x += pose.scale_x - 1
+        body_scale_y += pose.scale_y - 1
     elif active_state == "sleep":
         head_tilt = -8
         ear_motion = -4 + breathe * 0.5
@@ -620,8 +657,8 @@ def draw_scene(
     painter.translate(-150, -282)
     _draw_tail(painter, tail_angle)
     leg_offset = 5 if active_state == "drag" else 0
-    _draw_foot(painter, 122, 279 + leg_offset, -12 if active_state == "dance" and math.sin(motion_time * 6.5) > 0 else -3)
-    _draw_foot(painter, 178, 279 + leg_offset, 12 if active_state == "dance" and math.sin(motion_time * 6.5) < 0 else 3)
+    _draw_foot(painter, 122 + (pose.left_foot_x if dancing else 0), 279 + leg_offset + (pose.left_foot_y if dancing else 0), pose.left_foot_angle if dancing else -3)
+    _draw_foot(painter, 178 + (pose.right_foot_x if dancing else 0), 279 + leg_offset + (pose.right_foot_y if dancing else 0), pose.right_foot_angle if dancing else 3)
     painter.setPen(_pen(_OUTLINE, 2.5))
     painter.setBrush(_gradient(128, 180, 173, 282, "#f18b63", "#e07153", "#d5634f"))
     painter.drawPath(_body_path())
@@ -632,9 +669,8 @@ def draw_scene(
         ("C", (128, 278, 172, 278, 176, 260)),
         ("C", (181, 241, 174, 215, 150, 210)), ("Z", ()),
     ]))
-    if active_state == "dance":
-        _draw_arm(painter, False, -15 + math.sin(motion_time * 6.5) * 16, raised=True)
-        _draw_arm(painter, True, -15 - math.sin(motion_time * 6.5) * 16, raised=True)
+    if dancing:
+        pass  # Dancing paws are painted in front of the face below.
     elif active_state == "wave":
         _draw_arm(painter, False, arm_angle)
         _draw_arm(painter, True, -17 + math.sin(motion_time * 9) * 14, raised=True)
@@ -646,6 +682,9 @@ def draw_scene(
         _draw_arm(painter, True, -17 if active_state == "feed" else -arm_angle)
     _draw_scarf(painter, math.sin(motion_time * 2.2) * 3)
     _draw_face(painter, active_state, motion_time, look, head_tilt, ear_motion, paused)
+    if dancing:
+        _draw_arm(painter, False, pose.left_arm, raise_amount=pose.left_raise)
+        _draw_arm(painter, True, pose.right_arm, raise_amount=pose.right_raise)
     if active_state == "feed":
         _draw_cookie(painter, motion_time)
     if active_state == "happy":
@@ -653,8 +692,8 @@ def draw_scene(
             phase = (motion_time * 0.55 + index * 0.3) % 1
             opacity = math.sin(phase * math.pi) * 0.85
             _heart(painter, x + math.sin(motion_time * 2 + index) * 4, y - phase * 23, size, opacity)
-    elif active_state == "dance":
-        _draw_notes(painter, motion_time)
+    elif dancing:
+        _draw_dance_effects(painter, dance_style, action_time, pose.intensity)
     elif active_state == "sleep":
         painter.setPen(QColor("#a497c1"))
         for index in range(3):

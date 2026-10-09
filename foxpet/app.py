@@ -2,19 +2,23 @@
 
 import random
 import time
+import math
+from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QActionGroup, QBitmap, QCursor, QImage, QPainter, QRegion
 from PySide6.QtWidgets import (
-    QApplication, QInputDialog, QMenu, QSystemTrayIcon, QWidget,
+    QApplication, QInputDialog, QLineEdit, QMenu, QSystemTrayIcon, QWidget,
 )
 
+from .dances import DANCE_STYLES
 from .model import PetModel, clamp_position
+from .notifications import WeComNotifier, read_url, validate_webhook
 from .renderer import draw_scene, render_icon
 
 
 class PetWindow(QWidget):
-    def __init__(self, settings=None, tray_available=None):
+    def __init__(self, settings=None, tray_available=None, notifier=None, notification_config=None):
         super().__init__(None, Qt.WindowType.FramelessWindowHint |
                          Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -24,9 +28,15 @@ class PetWindow(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings = settings or QSettings("HoneyPet", "Taotao")
+        self.notification_config = (Path(notification_config) if notification_config is not None
+                                    else Path(__file__).resolve().parents[1] / "notification_config.json")
+        self.notifier = notifier if notifier is not None else WeComNotifier(self)
+        self.notifier.completed.connect(self.on_call_completed)
+        self.notifier.busy_changed.connect(self.update_call_action)
         self.nickname = str(self.settings.value("nickname", "你"))[:16]
         self.model = PetModel()
         self.model.auto_peek = self.settings.value("auto_peek", True, type=bool)
+        self.model.auto_dance = self.settings.value("auto_dance", True, type=bool)
         self.model.paused = self.settings.value("paused", False, type=bool)
         self.model.say("点点我的小脑袋呀", 6.0)
         self._pressed_at = None
@@ -57,6 +67,10 @@ class PetWindow(QWidget):
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self.tick)
         self.timer.start(33)
+        self.call_timer = QTimer(self)
+        self.call_timer.setInterval(500)
+        self.call_timer.timeout.connect(self.update_call_action)
+        self.call_timer.start()
         self.update_hit_mask()
 
     def build_menu(self):
@@ -75,13 +89,19 @@ class PetWindow(QWidget):
         action("探出来陪我", self.summon)
         action("摸摸头 ♡", lambda: self.react("happy"))
         action("吃一块小饼干", lambda: self.react("feed"))
-        action("跳个开心舞", lambda: self.react("dance"))
+        self.dances_menu = menu.addMenu("跳个开心舞 ♪")
+        dances = self.dances_menu
+        dances.addAction("随机跳一套").triggered.connect(lambda: self.dance())
+        for style, label in DANCE_STYLES.items():
+            dances.addAction(label).triggered.connect(lambda checked=False, value=style: self.dance(value))
         action("睡一小会儿", lambda: self.react("sleep"))
+        self.call_action = action("呼叫老公 ♡", self.call_husband)
         menu.addSeparator()
         action("缩回去，露出小脑袋", self.return_to_corner)
         hide = action("藏到右下角托盘", self.hide_to_tray)
         hide.setEnabled(self.tray_available)
-        sizes = menu.addMenu("小狐狸的大小")
+        self.sizes_menu = menu.addMenu("小狐狸的大小")
+        sizes = self.sizes_menu
         group = QActionGroup(self)
         for label, scale in (("小小只", 0.8), ("刚刚好", 1.0), ("大一点", 1.2)):
             item = sizes.addAction(label)
@@ -92,10 +112,14 @@ class PetWindow(QWidget):
         self.auto_action = action("闲置 45 秒后缩回", self.toggle_auto_peek)
         self.auto_action.setCheckable(True)
         self.auto_action.setChecked(self.model.auto_peek)
+        self.dance_action = action("偶尔自动跳一段", self.toggle_auto_dance)
+        self.dance_action.setCheckable(True)
+        self.dance_action.setChecked(self.model.auto_dance)
         self.pause_action = action("暂停小动作", self.toggle_pause)
         self.pause_action.setCheckable(True)
         self.pause_action.setChecked(self.model.paused)
         action("我该怎么称呼你…", self.change_nickname)
+        action("设置企业微信通知…", self.configure_wecom)
         menu.addSeparator()
         action("退出小狐狸", self.quit_pet)
         return menu
@@ -225,6 +249,74 @@ class PetWindow(QWidget):
         self.update_hit_mask()
         self.update()
 
+    def dance(self, style=None):
+        self._single_click.stop()
+        if self.model.presence == "tray":
+            self.show()
+        self.model.start_dance(style)
+        self.model.say(f"给{self.nickname}跳个{DANCE_STYLES[self.model.dance_style]} ♪")
+        self._last_tick = time.monotonic()
+        self.update_hit_mask()
+        self.update()
+
+    def toggle_auto_dance(self, checked):
+        self.model.auto_dance = checked
+        self.settings.setValue("auto_dance", checked)
+
+    def configure_wecom(self):
+        current = read_url(self.settings, self.notification_config)
+        text, accepted = QInputDialog.getText(
+            None, "设置企业微信通知", "粘贴企业微信机器人 webhook 地址：",
+            QLineEdit.EchoMode.Password, current)
+        if not accepted:
+            return False
+        url = text.strip()
+        if not validate_webhook(url):
+            self.model.say("地址不正确，请粘贴完整的企业微信机器人地址", 6.0)
+            self.update_hit_mask()
+            self.update()
+            return False
+        self.settings.setValue("wecom_webhook", url)
+        self.settings.sync()
+        self.model.say("记好啦，点“呼叫老公”就能通知他 ♡", 4.0)
+        self.update_hit_mask()
+        self.update()
+        return True
+
+    def update_call_action(self, *args):
+        cooldown = math.ceil(self.notifier.cooldown_remaining)
+        self.call_action.setEnabled(not self.notifier.busy and cooldown <= 0)
+        label = ("呼叫老公（发送中…）" if self.notifier.busy else
+                 f"呼叫老公（{cooldown} 秒后可再呼叫）" if cooldown else "呼叫老公 ♡")
+        self.call_action.setText(label)
+
+    def call_husband(self):
+        self._single_click.stop()
+        url = read_url(self.settings, self.notification_config)
+        if not url:
+            if not self.configure_wecom():
+                return
+            url = read_url(self.settings, self.notification_config)
+        if self.model.presence == "tray":
+            self.summon()
+        self.model.react("wave")
+        self.model.say("正在呼叫老公…", 12.0)
+        if not self.notifier.start(url):
+            self.model.say(self.notifier.last_error or "稍等一下再呼叫呀", 5.0)
+        self.update_call_action()
+        self.update_hit_mask()
+        self.update()
+
+    def on_call_completed(self, success, message):
+        if self._quitting:
+            return
+        if success and self.model.presence != "tray":
+            self.model.react("happy")
+        self.model.say(message, 6.0)
+        self.update_call_action()
+        self.update_hit_mask()
+        self.update()
+
     def return_to_corner(self):
         self._single_click.stop()
         self.model.peek()
@@ -325,4 +417,6 @@ class PetWindow(QWidget):
         self.settings.sync()
         self.tray.hide()
         self.timer.stop()
+        self.call_timer.stop()
+        self.notifier.cancel()
         QApplication.instance().quit()

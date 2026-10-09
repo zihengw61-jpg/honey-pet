@@ -1,13 +1,20 @@
 {
-  "portable_bytes": 86218343,
-  "portable_sha256": "3f02aa38b78f89e3cb912d5d34b8a1bf1630259e2660aaf7dfbd6ffe1dad12bf",
-  "portable_entries": 3185,
-  "app_and_assets_byte_equal": 6,
-  "source_bytes": 126937,
-  "source_sha256": "572482ec9facb6e8886dafc4599138546cb8a86f778669362a4e2a9ba2ed4ebe",
+  "app_version": "1.1.0",
+  "windows_native_execution_tested": false,
+  "portable_app_assets_byte_equal_files": 8,
   "official_launcher_unmodified": true,
+  "qschannel_backend_present_and_x64": true,
+  "public_personal_config_absent": true,
+  "portable_bytes": 86226849,
+  "portable_sha256": "31e00909f9722eb330815c143105ac34d7fa1a03ccee1bca03a7d7d470da307f",
+  "portable_entries": 3188,
+  "portable_credential_absence_scan_passed": true,
+  "source_byte_equal_files": 32,
+  "source_bytes": 150791,
+  "source_sha256": "a2309b4bedb3d84155b8879624ca9d990bbd1f283d2919185f22b73f84a4298a",
+  "source_entries": 32,
+  "source_credential_absence_scan_passed": true,
   "zip_integrity_passed": true,
   "excluded_directories_absent": true,
-  "third_party_runtime_dependencies_audited": true,
-  "windows_native_execution_tested": false
+  "third_party_runtime_dependencies_audited": true
 }

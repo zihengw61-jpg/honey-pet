@@ -9,6 +9,7 @@ python312._pth and app/sitecustomize.py start the app with isolated packages.
 from __future__ import annotations
 
 import argparse
+import ast
 from email.parser import BytesParser
 import hashlib
 import json
@@ -20,6 +21,8 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+
+from public_package import assert_public_distribution, assert_public_inputs, copy_public_tree
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +42,17 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             value.update(chunk)
     return value.hexdigest()
+
+
+def app_version() -> str:
+    """Read package metadata without importing Qt or application code."""
+    tree = ast.parse((ROOT / "foxpet/__init__.py").read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+            return node.value.value
+    raise ValueError("foxpet.__version__ must be a literal string for packaging")
 
 
 def download_packages(cache: Path) -> None:
@@ -129,9 +143,9 @@ def assemble(cache: Path, destination: Path) -> None:
     app = destination / "app"
     app.mkdir()
     shutil.copy2(ROOT / "main.py", app / "main.py")
-    shutil.copytree(ROOT / "foxpet", app / "foxpet", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    copy_public_tree(ROOT / "foxpet", app / "foxpet")
     if (ROOT / "assets").is_dir():
-        shutil.copytree(ROOT / "assets", app / "assets", ignore=shutil.ignore_patterns("__pycache__"))
+        copy_public_tree(ROOT / "assets", app / "assets")
     shutil.copy2(ROOT / "scripts/portable_bootstrap.py", app / "sitecustomize.py")
     (destination / "pythonw.exe").rename(destination / "HoneyPet.exe")
     write_windows_text(destination / "python312._pth", ".\nDLLs\nLib\nLib\\site-packages\napp\nimport site\n")
@@ -154,7 +168,8 @@ pause
 
 适用 Windows 10 / 11，64 位电脑。
 请先把压缩包完整解压到一个文件夹，然后双击 HoneyPet.exe。
-不需要安装 Python；使用时不需要联网。
+不需要安装 Python；角色与动画可离线运行。
+“呼叫老公”功能需要联网，并通过个人配置连接企业微信机器人。
 请保留整个文件夹，不要单独把 EXE 文件移出去。
 
 小狐狸默认在桌面右下角探出脑袋；点击后钻出来。
@@ -165,13 +180,13 @@ pause
 此便携包在 Linux 上组装，未在真实 Windows 桌面进行运行验证。
 随包附带完整应用源码；第三方运行库和许可说明在 THIRD_PARTY.txt。
 """)
-    for source_name in ("README.md", "WINDOWS.md", "LICENSE"):
+    for source_name in ("README.md", "WINDOWS.md", "LICENSE", "notification_config.example.json"):
         if (ROOT / source_name).is_file():
             shutil.copy2(ROOT / source_name, destination / source_name)
-    shutil.copytree(ROOT / "third_party", destination / "third_party")
+    copy_public_tree(ROOT / "third_party", destination / "third_party")
     shutil.copy2(ROOT / "third_party/THIRD_PARTY.txt", destination / "THIRD_PARTY.txt")
     manifest = {
-        "platform": "Windows 10/11 x64", "python": PYTHON_VERSION,
+        "app_version": app_version(), "platform": "Windows 10/11 x64", "python": PYTHON_VERSION,
         "PySide6-Essentials": QT_VERSION, "shiboken6": QT_VERSION,
         "launcher": "Unmodified official Pythonw executable, renamed HoneyPet.exe",
         "windows_execution_tested": False,
@@ -183,6 +198,7 @@ pause
         "HoneyPet.exe", "python.exe", "python312.dll", "DLLs/_ctypes.pyd",
         "Lib/site-packages/PySide6/QtCore.pyd", "Lib/site-packages/PySide6/QtGui.pyd",
         "Lib/site-packages/PySide6/QtWidgets.pyd", "Lib/site-packages/PySide6/plugins/platforms/qwindows.dll",
+        "Lib/site-packages/PySide6/QtNetwork.pyd", "Lib/site-packages/PySide6/plugins/tls/qschannelbackend.dll",
     ):
         verify_pe_x64(destination / relative)
 
@@ -201,11 +217,13 @@ def main() -> int:
         return 0
     if not (ROOT / "main.py").is_file() or not (ROOT / "foxpet").is_dir():
         parser.error("Application main.py and foxpet/ must exist before packaging")
+    assert_public_inputs(ROOT)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="honeypet-portable-", dir=args.output.parent) as temporary:
         pet_dir = Path(temporary) / "HoneyPet"
         pet_dir.mkdir()
         assemble(args.cache, pet_dir)
+        assert_public_distribution(pet_dir)
         temporary_zip = Path(temporary) / "portable.zip"
         with zipfile.ZipFile(temporary_zip, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             for path in sorted(pet_dir.rglob("*")):

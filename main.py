@@ -23,7 +23,9 @@ def configure_logging():
 
 
 def main(argv=None):
+    from foxpet import __version__
     parser = argparse.ArgumentParser(description="桃桃 · 桌面小狐狸")
+    parser.add_argument("--version", action="version", version=f"HoneyPet {__version__}")
     parser.add_argument("--smoke-test", action="store_true", help="Exit after a brief GUI startup check")
     args = parser.parse_args(argv)
     configure_logging()
